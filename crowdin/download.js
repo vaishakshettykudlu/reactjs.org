@@ -8,11 +8,33 @@ const DOWNLOADED_TRANSLATIONS_PATH = path.resolve(__dirname, '__translations');
 const DOWNLOADED_TRANSLATIONS_DOCS_PATH = path.resolve(
   __dirname,
   '__translations',
-  'docs',
+  'test-17', // TODO (crowdin) This is probably not part of the final export structure
+  'docs'
 );
 
+const validateConfig = ({ key, threshold, url }) => {
+  const errors = [];
+  if (!key) {
+    errors.push('key: No process.env.CROWDIN_API_KEY value defined.');
+  }
+  if (!Number.isInteger(threshold)) {
+    errors.push(`threshold: Invalid translation threshold defined.`);
+  }
+  if (!url) {
+    errors.push('url: No Crowdin project URL defined.');
+  }
+  if (errors.length > 0) {
+    console.error('Invalid Crowdin config values for:\n• ' + errors.join('\n• '));
+
+    throw Error('Invalid Crowdin config');
+  }
+};
+
 function main() {
+  validateConfig(config);
+
   const crowdin = new Crowdin({apiKey: config.key, endpointUrl: config.url});
+
   process.chdir(SYMLINKED_TRANSLATIONS_PATH);
 
   crowdin
@@ -23,14 +45,13 @@ function main() {
     .then(locales => {
       const usableLocales = locales
         .filter(
-          locale => locale.translated_progress > config.translation_threshold,
+          locale => locale.translated_progress > config.threshold,
         )
         .map(local => local.code);
 
       const localeDirectories = getDirectories(
         DOWNLOADED_TRANSLATIONS_DOCS_PATH,
       );
-
       const localeToFolderMap = createLocaleToFolderMap(localeDirectories);
 
       usableLocales.forEach(locale => {
@@ -43,14 +64,12 @@ function main() {
 // Note that the current working directory of this node process should be where the symlink is created
 // or else the relative paths would be incorrect
 function createSymLink(folder) {
-  symlink(`../__translations/docs/${folder}`, folder, err => {
+  symlink(path.resolve(DOWNLOADED_TRANSLATIONS_DOCS_PATH, folder), folder, err => {
     if (!err) {
-      console.log(`Created symlink for ${folder}.`);
       return;
     }
 
     if (err.code === 'EEXIST') {
-      console.log(
         `Skipped creating symlink for ${folder}. A symlink already exists.`,
       );
     } else {
@@ -60,19 +79,21 @@ function createSymLink(folder) {
   });
 }
 
-// When we run getTranslationStatus(), it gives us 2-ALPHA locale codes unless necessary
-// However, the folder structure of downloaded translations always has 4-ALPHA locale codes
-// This function creates a map from a locale code to its corresponding folder name
+// When we run getTranslationStatus(), it typically gives us ISO 639-1 (e.g. "fr" for French) or 639-3 (e.g. "fil" for Filipino) language codes,
+// But the folder structure of downloaded translations uses locale codes (e.g. "fr-FR" for French, "fil-PH" for the Philippines).
+// This function creates a map between language and locale code.
 function createLocaleToFolderMap(directories) {
-  const twoAlphaLocale = locale => locale.substring(0, 2);
+  const localeToLanguageCode = locale => locale.includes('-') ? locale.substr(0, locale.indexOf('-')) : locale;
   const localeToFolders = new Map();
   const localeToFolder = new Map();
 
   for (let locale of directories) {
+    const languageCode = localeToLanguageCode(locale);
+
     localeToFolders.set(
-      twoAlphaLocale(locale),
-      localeToFolders.has(twoAlphaLocale(locale))
-        ? localeToFolders.get(twoAlphaLocale(locale)).concat(locale)
+      languageCode,
+      localeToFolders.has(languageCode)
+        ? localeToFolders.get(languageCode).concat(locale)
         : [locale],
     );
   }
@@ -87,6 +108,7 @@ function createLocaleToFolderMap(directories) {
     }
   });
 
+  console.log(localeToFolder);
   return localeToFolder;
 }
 
